@@ -1,6 +1,7 @@
 #include <rtl-sdr.h>
 #include <iostream>
 #include <cassert>
+#include <complex>
 constexpr int SAMPLE_RATE = 2'400'000;
 constexpr int CENTER_FREQ = 98'000'000;
 constexpr int GAIN_MODE = 1;
@@ -30,9 +31,11 @@ int main() {
     std::vector<uint8_t> buffer(BUF_MAX);
     check(rtlsdr_read_sync(device, buffer.data(), BUF_MAX, &n_read), "read_input", device);
     assert(n_read == BUF_MAX);
-    for (int i = 0; i < BUF_MAX - 1; i += 2) {
-        std::cout << int(buffer[i]) << ' ' << int(buffer[i + 1]) << '\n';
-    }
 
+    std::vector<std::complex<float>> iq(BUF_MAX / 2);
+    for (int i = 0; i < BUF_MAX - 1; i += 2) {
+        iq[i / 2] = std::complex<float>((buffer[i] - 127.5) / 127.5, (buffer[i + 1] - 127.5) / 127.5);
+    }
+    
     rtlsdr_close(device);
 }
