@@ -48,7 +48,7 @@ int main() {
 
     std::vector<double> results = spec.average();
     std::ofstream file("../data/spectrum.csv");
-    file << "frequency,power\n";
+    file << "frequency(Hz),power\n";
     for (int i = 0; i < FFT_SIZE; i++) {
         double power = results[i];
         double frequency = CENTER_FREQ + (i - FFT_SIZE / 2.0) * ((double) SAMPLE_RATE / FFT_SIZE);
