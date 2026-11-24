@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <cmath>
 #include <numbers>
+#include <algorithm>
 constexpr int SIGN = FFTW_FORWARD;
 constexpr unsigned FLAG = FFTW_MEASURE;
 
@@ -12,9 +13,10 @@ Spectrometer::Spectrometer(int n) {
     out = fftwf_alloc_complex(n);
     plan = fftwf_plan_dft_1d(n, in, out, SIGN, FLAG);
     total_power.resize(n);
+    window.reserve(n);
     total_chunks = 0;
     for (int i = 0; i < n; i++) {
-        window[i] = 0.5 - 0.5 * cos(2 * std::numbers::pi_v<float> * i / (n - 1));
+        window.push_back(0.5 - 0.5 * cos(2 * std::numbers::pi_v<float> * i / (n - 1)));
     }
 }
 
@@ -52,6 +54,6 @@ std::vector<double> Spectrometer::average() const {
     for (int i = 0; i < n; i++) {
         res[i] = total_power[i] / total_chunks;
     }
-    std::rotate(res.begin(), res.begin() + n, res.end());
+    std::rotate(res.begin(), res.begin() + n / 2, res.end());
     return res;
 };
