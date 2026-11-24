@@ -6,6 +6,7 @@
 class Spectrometer {
 public:
     explicit Spectrometer(int n);
+    ~Spectrometer();
     void add(const std::vector<std::complex<float>>& samples);
     std::vector<double> average() const;
 
@@ -13,6 +14,8 @@ private:
     std::size_t n;
     fftwf_complex* in;
     fftwf_complex* out;
-    std::vector<double> total;
+    std::vector<double> total_power;
+    std::vector<float> window;
     fftwf_plan plan;
+    int total_chunks;
 };

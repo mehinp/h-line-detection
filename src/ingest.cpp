@@ -1,7 +1,9 @@
 #include <rtl-sdr.h>
+#include "spectrometer.h"
 #include <iostream>
 #include <cassert>
 #include <complex>
+
 constexpr int SAMPLE_RATE = 2'400'000;
 constexpr int CENTER_FREQ = 98'000'000;
 constexpr int GAIN_MODE = 1;
