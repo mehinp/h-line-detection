@@ -94,7 +94,7 @@ std::string to_utc_string(Time t) {
 }
 
 void gen_file(Metadata& meta, std::vector<double>& results) {
-    std::string path = "data/" + meta.title + std::to_string(std::chrono::system_clock::to_time_t(meta.end_time)) + ".csv";
+    std::string path = "data/" + meta.title + to_utc_string(meta.end_time) + ".csv";
     std::ofstream file(path);
     file << "# Title: " << meta.title << '\n';
     file << "# Target: " << meta.target << '\n';
