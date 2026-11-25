@@ -4,11 +4,18 @@
 #include <cassert>
 #include <complex>
 #include <fstream>
+#include <chrono>
+#include <string>
+#include <sstream>
 constexpr int SAMPLE_RATE = 2'400'000;
 constexpr int GAIN_MODE = 1;
 constexpr int BIAS_TEE = 1;
 constexpr int BUF_MAX = 1 << 18;
 constexpr int FFT_SIZE = 2048;
+constexpr double LATITUDE = 39.307;
+constexpr double LONGITUDE = -76.811;
+
+using Time = std::chrono::system_clock::time_point;
 
 struct Settings {
     int center_freq = 1'420'000'000;
@@ -17,25 +24,54 @@ struct Settings {
     std::string title = "test";
 };
 
-Settings parse(int argc, char* argv[]) {
+struct Metadata {
+    std::string title;
+    std::string target;
+    Time start_time;
+    Time end_time;
+    int chunks;
+    int center_freq_hz;
+    int sample_rate;
+    int fft_size;
+    int gain_tenths_db;
+    double lat;
+    double lng; 
+    double alt_deg;
+    double az_deg;
+};
+
+Settings parse(int argc, char* argv[], Metadata& meta) {
     Settings s;
     for (int i = 1; i < argc; i++) {
         std::string which = argv[i];
         i += 1;
         std::string value = argv[i];
-        if (which == "--freq") {
+        if (which == "--target") {
+            meta.target = value;
+        } else if (which == "--alt") {
+            meta.alt_deg = stod(value);
+        } else if (which == "--az") {
+            meta.az_deg = stod(value);
+        } else if (which == "--freq") {
             s.center_freq = stoi(value);
+            meta.center_freq_hz = s.center_freq;
         } else if (which == "--gain") {
             s.gain = stoi(value);
+            meta.gain_tenths_db = s.gain;
         } else if (which == "--seconds") {
             s.seconds = stod(value);
         } else if (which == "--title") {
             s.title = value;
+            meta.title = s.title;
         } else {
             std::cout << "Unknown setting: " << which << '\n';
             std::exit(1);
         }
     }
+    meta.lat = LATITUDE;
+    meta.lng = LONGITUDE;
+    meta.fft_size = FFT_SIZE;
+    meta.sample_rate = SAMPLE_RATE;
     return s;
 }
 
@@ -49,8 +85,42 @@ void check(int res, const std::string& str, rtlsdr_dev_t* device) {
     }
 }
 
+std::string to_utc_string(Time t) {
+    // time formatting thanks to claude
+    std::time_t tt = std::chrono::system_clock::to_time_t(t);
+    std::ostringstream out;
+    out << std::put_time(std::gmtime(&tt), "%FT%TZ");
+    return out.str();
+}
+
+void gen_file(Metadata& meta, std::vector<double>& results) {
+    std::string path = "data/" + meta.title + std::to_string(std::chrono::system_clock::to_time_t(meta.end_time)) + ".csv";
+    std::ofstream file(path);
+    file << "# Title: " << meta.title << '\n';
+    file << "# Target: " << meta.target << '\n';
+    file << "# Start time: " << to_utc_string(meta.start_time) << '\n';
+    file << "# End time: " << to_utc_string(meta.end_time) << '\n';
+    file << "# Chunks: " << meta.chunks << '\n';
+    file << "# Center frequency (Hz): " << meta.center_freq_hz << '\n';
+    file << "# Sample rate (per second): " << meta.sample_rate << '\n';
+    file << "# FFT size: " << meta.fft_size << '\n';
+    file << "# Gain (tenths of db): " << meta.gain_tenths_db << '\n';
+    file << "# Source latitude: " << meta.lat << '\n';
+    file << "# Source longitude: " << meta.lng << '\n';
+    file << "# Altitude degree: " << meta.alt_deg << '\n';
+    file << "# Azimuth degree: " << meta.az_deg << '\n';
+    file << "frequency(Hz),power\n";
+    for (int i = 0; i < FFT_SIZE; i++) {
+        double power = results[i];
+        double frequency = meta.center_freq_hz + (i - FFT_SIZE / 2.0) * ((double) SAMPLE_RATE / FFT_SIZE);
+        file << std::fixed << std::setprecision(3) << frequency << ',' << std::setprecision(8) << power << '\n';
+    }
+} 
+
+
 int main(int argc, char* argv[]) {
-    Settings s = parse(argc, argv);
+    Metadata meta;
+    Settings s = parse(argc, argv, meta);
     rtlsdr_dev_t* device = nullptr;
     check(rtlsdr_open(&device, 0), "open", device);
     check(rtlsdr_set_sample_rate(device, SAMPLE_RATE), "set_sample_rate", device);
@@ -66,6 +136,8 @@ int main(int argc, char* argv[]) {
 
     int n_read = 0;
     int total_reads = SAMPLE_RATE * s.seconds / (BUF_MAX / 2);
+    meta.chunks = total_reads * (BUF_MAX / 2 / FFT_SIZE);
+    meta.start_time = std::chrono::system_clock::now();
     for (int iter = 0; iter < total_reads; iter++) {
         check(rtlsdr_read_sync(device, buffer.data(), BUF_MAX, &n_read), "read_input", device);
         assert(n_read == BUF_MAX);
@@ -76,17 +148,10 @@ int main(int argc, char* argv[]) {
         }
         spec.add(iq);
     }
-
+    meta.end_time = std::chrono::system_clock::now();
     std::vector<double> results = spec.average();
-    std::string path = "data/" + s.title + "_spectrum.csv";
-    std::ofstream file(path);
-    file << "frequency(Hz),power\n";
-    for (int i = 0; i < FFT_SIZE; i++) {
-        double power = results[i];
-        double frequency = s.center_freq + (i - FFT_SIZE / 2.0) * ((double) SAMPLE_RATE / FFT_SIZE);
-        file << std::fixed << std::setprecision(3) << frequency << ',' << std::setprecision(8) << power << '\n';
-    }
+    gen_file(meta, results);
+
     std::cout << "Processed " << 1LL * total_reads * (BUF_MAX / 2) << " I/Q pairs" << '\n';
-    std::cout << "Results in " + path << '\n';
     rtlsdr_close(device);
 }
