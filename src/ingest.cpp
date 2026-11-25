@@ -138,6 +138,7 @@ int main(int argc, char* argv[]) {
     int total_reads = SAMPLE_RATE * s.seconds / (BUF_MAX / 2);
     meta.chunks = total_reads * (BUF_MAX / 2 / FFT_SIZE);
     meta.start_time = std::chrono::system_clock::now();
+    double average_power = 0;
     for (int iter = 0; iter < total_reads; iter++) {
         check(rtlsdr_read_sync(device, buffer.data(), BUF_MAX, &n_read), "read_input", device);
         assert(n_read == BUF_MAX);
@@ -145,6 +146,14 @@ int main(int argc, char* argv[]) {
         std::vector<std::complex<float>> iq(BUF_MAX / 2);
         for (int i = 0; i < BUF_MAX - 1; i += 2) {
             iq[i / 2] = std::complex<float>((buffer[i] - 127.5) / 127.5, (buffer[i + 1] - 127.5) / 127.5);
+            average_power += iq[i / 2].real() * iq[i / 2].real() + iq[i / 2].imag() * iq[i / 2].imag();
+        }
+
+        if ((iter + 1) % 18 == 0) {
+            average_power /= (18 * BUF_MAX / 2);
+            average_power = 10 * log10(average_power);
+            std::cout << "t = " << (iter + 1) / 18 << "s" << " power = " << average_power << "dB" << '\n';
+            average_power = 0;
         }
         spec.add(iq);
     }
