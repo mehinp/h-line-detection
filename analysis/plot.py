@@ -1,69 +1,52 @@
 import argparse
-from pathlib import Path
 import pandas as pd 
 import matplotlib.pyplot as plt
+from pathlib import Path
+from spectra import LIGHT_SPEED, F_ZERO, DATA_DIR, latest_csv, trim_edges, on_off_ratio, freq_to_velocity
 
-DATA_DIR = Path("data")
-
-def latest_csv(folder: Path) -> Path | None:
-    return max(folder.glob("*.csv"), key=lambda p: p.stat().st_mtime, default=None)
-
-def trim_edges(freq, power, half_width=0.8):
-    center = freq.median()
-    keep = (freq - center).abs() < half_width
-    return freq[keep], power[keep]
-
-def on_off_ratio(on_path, off_path):
-    on = pd.read_csv(on_path, comment="#")
-    off = pd.read_csv(off_path, comment="#")
-    freq = on["frequency(Hz)"] / 1e6
-    ratio = on["power"] / off["power"]
-    freq, ratio = trim_edges(freq, ratio)
-    ratio = ratio / ratio.median()
-    ratio = ratio.rolling(7, center=True).median()
-    return freq, ratio
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("csv_path", nargs="?", type=Path)
-    parser.add_argument("off_path", nargs="?", type=Path)
-    parser.add_argument("--full", action="store_true")
-    args = parser.parse_args()
-
+def get_csv_path(args) -> Path:
     csv_path = args.csv_path
     if csv_path is None:
         csv_path = latest_csv(DATA_DIR)
         if csv_path is None:
-            parser.error(f"No CSVs found in {DATA_DIR}")
+            raise RuntimeError(f"No CSVs found in {DATA_DIR}")
         print(f"Using newest data: {csv_path.name}")
     elif not csv_path.exists():
-        parser.error(f"File not found: {csv_path}")
+        raise RuntimeError(f"File not found: {csv_path}")
+    return csv_path
 
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv_path", nargs="?", type=Path)
+    parser.add_argument("--off_path", nargs="?", type=Path)
+    parser.add_argument("--trim", action="store_true")
+    parser.add_argument("--velocity", action="store_true")
+
+    args = parser.parse_args()
     fig, ax = plt.subplots(figsize=(10, 5))
+    csv_path = get_csv_path(args)
 
-    if args.off_path is not None:
-        freq, ratio = on_off_ratio(csv_path, args.off_path)
-        ax.plot(freq, ratio, linewidth=0.8)
-        ax.axhline(1.0, color="gray", linewidth=0.5)
-        ax.axvline(1420.405751, color="red", linestyle="--", linewidth=0.7)
-        ax.set_ylabel("On / off")
-        ax.set_title(f"{csv_path.stem} / {args.off_path.stem}")
-        out_path = csv_path.with_name(csv_path.stem + "_ratio.png")
-    else:
-        df = pd.read_csv(csv_path, comment="#")
-        freq = df["frequency(Hz)"] / 1e6
-        power = df["power"]
-        if not args.full:
-            freq, power = trim_edges(freq, power, half_width=0.8)
-        ax.plot(freq, power, linewidth=0.8)
-        ax.set_ylabel("Power (arbitrary units)")
+    df = pd.read_csv(csv_path, comment="#")
+    freq = df["frequency(Hz)"]
+    power = df["power"] 
+    if args.trim:
+        freq, power = trim_edges(freq, power, half_width=0.8e6)
+
+    x_value, x_label = (freq / 1e6, "Frequency (MHz)") if not args.velocity else (freq_to_velocity(freq), "Velocity (km/s)")
+    y_value, y_label = (power, "Power (arbitray units)") if args.off_path is None else (on_off_ratio(csv_path, args.off_path, args.trim), "On / off")
+    ax.axvline(0 if args.velocity else F_ZERO / 1e6, color="red", linestyle="--", linewidth=0.7)
+    ax.plot(x_value, y_value)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+
+    suffix = ("_velocity" if args.velocity else "") + ("_trim" if args.trim else "") + ("_ratio" if args.off_path else "")
+    if args.off_path is None:
         ax.set_title("Averaged spectrum")
-        suffix = "" if args.full else "_trim"
-        out_path = csv_path.with_name(csv_path.stem + suffix + ".png")
+    else:
+        ax.set_title(f"{csv_path.stem} / {args.off_path.stem}")
 
-    ax.set_xlabel("Frequency (MHz)")
-    ax.grid(True, alpha=0.3)
-
+    out_path = csv_path.with_name(csv_path.stem + suffix + ".png")
+    ax.grid(True, alpha=0.4)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"Saved {out_path}")
     plt.show()
